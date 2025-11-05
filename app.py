@@ -7,14 +7,13 @@ from llm_client import GraniteClient
 app = Flask(__name__)
 app.secret_key = 'studymate_secret_key_2025'
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
 
-# Initialize components
-rag_engine = RAGEngine(chunk_size=500, chunk_overlap=50)
-llm_client = GraniteClient(device='cuda')  # GPU mode
+# Initialize components with improved settings
+rag_engine = RAGEngine(chunk_size=250, chunk_overlap=120, debug=True)
+llm_client = GraniteClient(device='cuda')  # GPU if available
 
-# Create upload folder
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def allowed_file(filename):
@@ -22,26 +21,26 @@ def allowed_file(filename):
 
 @app.route('/')
 def index():
-    session.clear()  # Clear previous session
+    session.clear()
     return render_template('index.html')
 
 @app.route('/process', methods=['POST'])
 def process():
-    print(f"\n{'='*80}")
-    print(f"[DEBUG] Starting PDF processing...")
-    print(f"{'='*80}")
-    
+    print("\n" + "="*90)
+    print("[APP] Starting PDF processing...")
+    print("="*90)
+
     if 'pdfs' not in request.files:
-        print(f"[ERROR] No 'pdfs' in request.files")
+        print("[APP] ERROR: No 'pdfs' in request.files")
         return redirect(url_for('index'))
-    
+
     files = request.files.getlist('pdfs')
-    print(f"[DEBUG] Received {len(files)} files")
-    
+    print(f"[APP] Received {len(files)} file(s)")
+
     if not files or files[0].filename == '':
-        print(f"[ERROR] Files list is empty or first file has no name")
+        print("[APP] ERROR: Empty file list or first file has no name")
         return redirect(url_for('index'))
-    
+
     pdf_paths = []
     for file in files:
         if file and allowed_file(file.filename):
@@ -49,33 +48,30 @@ def process():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             pdf_paths.append(filepath)
-            print(f"[DEBUG] Saved file: {filename} to {filepath}")
-    
+            print(f"[APP] Saved: {filepath}")
+
     if not pdf_paths:
-        print(f"[ERROR] No valid PDF files found")
+        print("[APP] ERROR: No valid PDFs")
         return redirect(url_for('index'))
-    
-    # Process PDFs: extract, chunk, embed, build FAISS index
+
     try:
-        print(f"[DEBUG] Processing {len(pdf_paths)} PDFs...")
+        print(f"[APP] Processing {len(pdf_paths)} PDF(s) with RAG...")
         rag_engine.process_pdfs(pdf_paths)
         session['processed'] = True
         session['num_chunks'] = len(rag_engine.chunks)
-        
-        print(f"[DEBUG] RAG engine setup complete with {session['num_chunks']} chunks")
-        
-        # Clean up uploaded files
+        print(f"[APP] RAG ready with {session['num_chunks']} chunks")
+
+        # Clean up uploads (index is already built)
         for path in pdf_paths:
             if os.path.exists(path):
                 os.remove(path)
-                print(f"[DEBUG] Cleaned up temporary file: {path}")
-        
-        print(f"[DEBUG] Processing complete!")
-        print(f"{'='*80}\n")
+                print(f"[APP] Removed temp: {path}")
+
+        print("[APP] Processing complete.\n")
         return render_template('ask.html', num_chunks=session['num_chunks'])
     except Exception as e:
-        print(f"[ERROR] Exception during PDF processing: {str(e)}")
         import traceback
+        print("[APP] ERROR during processing:", e)
         print(traceback.format_exc())
         return f"Error processing PDFs: {str(e)}", 500
 
@@ -89,71 +85,57 @@ def ask_page():
 def answer():
     if not session.get('processed'):
         return redirect(url_for('index'))
-    
+
     question = request.form.get('question', '').strip()
-    
     if not question:
         return redirect(url_for('ask_page'))
-    
+
     try:
-        print(f"\n{'='*80}")
-        print(f"[DEBUG] Question received: {question}")
-        print(f"{'='*80}")
-        
-        # Step 1: Retrieve chunks
-        print(f"[DEBUG] Total chunks available: {len(rag_engine.chunks)}")
-        print(f"[DEBUG] Retrieving top-5 relevant chunks...")
-        relevant_chunks = rag_engine.retrieve(question, top_k=5)
-        
-        print(f"[DEBUG] Retrieved {len(relevant_chunks)} chunks")
-        for i, chunk in enumerate(relevant_chunks):
-            print(f"[DEBUG] Chunk {i+1} relevance score: {chunk['score']:.4f}")
-            print(f"[DEBUG] Chunk {i+1} text preview: {chunk['text'][:100]}...")
-        
-        if not relevant_chunks:
-            print(f"[DEBUG] WARNING: No relevant chunks found!")
+        print("\n" + "="*90)
+        print("[APP] Question:", question)
+        print("="*90)
+
+        # Retrieve + build tight context (includes re-ranking & boosting inside RAG)
+        context, ranked = rag_engine.build_context(question, top_k=5, max_chars=3000)
+        print(f"[APP] Context length: {len(context)}")
+        print("[APP] Context preview >>>")
+        print(context[:800], "...\n")
+
+        if not context.strip():
+            print("[APP] WARNING: Empty context.")
             answer_text = "Information not found in the document."
             sources = []
         else:
-            # Step 2: Build context
-            context = "\n\n".join([chunk['text'] for chunk in relevant_chunks])
-            print(f"[DEBUG] Context length: {len(context)} characters")
-            print(f"[DEBUG] Starting answer generation with Mistral model...")
-            
+            # Generate with Granite
+            print("[APP] Calling Granite to generate answer...")
             try:
-                # Step 3: Generate answer
                 answer_text = llm_client.generate_answer(question, context, max_new_tokens=150)
-                print(f"[DEBUG] Answer generated successfully!")
-                print(f"[DEBUG] Answer length: {len(answer_text)} characters")
-                print(f"[DEBUG] Answer preview: {answer_text[:200]}...")
+                print("[APP] Answer OK. Preview:", answer_text[:200], "...\n")
             except Exception as e:
-                print(f"[ERROR] LLM generation failed: {str(e)}")
                 import traceback
+                print("[APP] ERROR in LLM generation:", e)
                 print(traceback.format_exc())
                 answer_text = f"Error in LLM generation: {str(e)}"
-            
-            # Step 4: Prepare sources
-            sources = [
-                {
-                    'text': chunk['text'][:300] + '...' if len(chunk['text']) > 300 else chunk['text'],
-                    'score': f"{chunk['score']:.3f}"
-                }
-                for chunk in relevant_chunks
-            ]
-            print(f"[DEBUG] Sources prepared: {len(sources)} sources")
-        
-        print(f"[DEBUG] Rendering answer.html with answer text...")
-        print(f"{'='*80}\n")
-        return render_template('answer.html', 
-                             question=question, 
-                             answer=answer_text, 
-                             sources=sources)
-    
+
+            # Prepare sources with metadata
+            sources = []
+            for r in ranked:
+                meta = r.get('meta', {})
+                src_name = os.path.basename(meta.get('source', ''))
+                pages = f"{meta.get('page_start', '?')}-{meta.get('page_end', '?')}"
+                sources.append({
+                    'text': (r['text'][:300] + '...') if len(r['text']) > 300 else r['text'],
+                    'score': f"{r.get('combined', r.get('score', 0.0)):.3f}",
+                    'meta': f"{src_name} (pp. {pages})"
+                })
+            print(f"[APP] Prepared {len(sources)} source excerpt(s).")
+
+        return render_template('answer.html', question=question, answer=answer_text, sources=sources)
+
     except Exception as e:
-        print(f"\n[CRITICAL ERROR] Exception in /answer route:")
         import traceback
+        print("[APP] CRITICAL:", e)
         print(traceback.format_exc())
-        print(f"{'='*80}\n")
         return f"Critical error: {str(e)}", 500
 
 @app.route('/new_question')
@@ -162,9 +144,11 @@ def new_question():
 
 @app.route('/reset')
 def reset():
-    print(f"[DEBUG] Resetting RAG engine...")
+    print("[APP] Resetting RAG engine...")
     rag_engine.reset()
+    session.clear()
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
+    # In production set debug=False and use a proper WSGI server
     app.run(debug=True, host='0.0.0.0', port=5000)
