@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyMate - PDF Q&A</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 StudyMate</h1>
+            <p class="subtitle">AI-Powered PDF Question Answering System</p>
+        </header>
+
+        <main>
+            <div class="upload-section">
+                <h2>Upload Your Study Materials</h2>
+                <form action="/process" method="POST" enctype="multipart/form-data">
+                    <div class="file-input-wrapper">
+                        <label for="pdfs" class="file-label">
+                            <span class="file-icon">📄</span>
+                            <span>Choose PDF Files</span>
+                        </label>
+                        <input type="file" 
+                               id="pdfs" 
+                               name="pdfs" 
+                               accept=".pdf" 
+                               multiple 
+                               required 
+                               onchange="displayFileNames()">
+                    </div>
+                    
+                    <div id="file-list" class="file-list"></div>
+                    
+                    <button type="submit" class="btn-primary">Process PDFs</button>
+                </form>
+            </div>
+
+            <div class="info-section">
+                <h3>How It Works</h3>
+                <ol>
+                    <li>Upload one or more PDF documents</li>
+                    <li>System extracts and processes the content</li>
+                    <li>Ask questions about your documents</li>
+                    <li>Get accurate answers with source references</li>
+                </ol>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by Granite AI • Built with Flask</p>
+        </footer>
+    </div>
+
+    <script>
+        function displayFileNames() {
+            const input = document.getElementById('pdfs');
+            const fileList = document.getElementById('file-list');
+            fileList.innerHTML = '';
+            
+            if (input.files.length > 0) {
+                const ul = document.createElement('ul');
+                for (let i = 0; i < input.files.length; i++) {
+                    const li = document.createElement('li');
+                    li.textContent = input.files[i].name;
+                    ul.appendChild(li);
+                }
+                fileList.appendChild(ul);
+            }
+        }
+    </script>
+</body>
+</html>
