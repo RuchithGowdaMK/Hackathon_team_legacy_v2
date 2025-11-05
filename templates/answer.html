@@ -31,6 +31,7 @@
                 <div class="source-card">
                     <p class="source-text">{{ source.text }}</p>
                     <p class="source-score">Relevance: {{ source.score }}</p>
+                    <p class="source-meta">{{ source.meta }}</p>
                 </div>
                 {% endfor %}
             </div>
@@ -39,6 +40,8 @@
             <div class="button-group">
                 <a href="/new_question" class="btn-primary">Ask Another Question</a>
                 <a href="/reset" class="btn-secondary">Upload New PDFs</a>
+                <!-- ✅ New button to view question history -->
+                <a href="/history" class="btn-secondary">View Question History</a>
             </div>
         </main>
 

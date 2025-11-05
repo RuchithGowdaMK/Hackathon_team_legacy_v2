@@ -12,3 +12,5 @@ huggingface-hub==0.36.0
 tokenizers==0.22.1
 protobuf==4.24.0
 sentencepiece==0.1.99
+docx2pdf==0.1.8
+reportlab==4.1.0
