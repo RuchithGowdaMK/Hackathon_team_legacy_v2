@@ -7,6 +7,8 @@ from llm_client import GraniteClient
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
+from textwrap import wrap
+
 
 # Import libraries for non-PDF document handling
 from docx import Document
@@ -83,6 +85,23 @@ def extract_text_from_txt(file_path):
     except Exception as e:
         print(f"[TXT ERROR] {e}")
         return ""
+    
+    from textwrap import wrap  # add at the top with other imports if not already
+
+def draw_wrapped_text(pdf, text, x, y, max_width, line_height=13):
+    """
+    Draw text on the PDF with automatic word wrapping and page breaks.
+    """
+    wrapped_lines = wrap(text, width=max_width)
+    for line in wrapped_lines:
+        if y < 80:  # Start a new page if bottom reached
+            pdf.showPage()
+            pdf.setFont("Helvetica", 10)
+            y = letter[1] - 60
+        pdf.drawString(x, y, line)
+        y -= line_height
+    return y
+
 
 # ====================================================
 # ROUTES
@@ -274,13 +293,8 @@ def download_history():
         y -= 15
 
         pdf.setFont("Helvetica", 10)
-        for line in pdf.breakLines(a_text, 85)[0]:
-            if y < 80:
-                pdf.showPage()
-                y = height - 60
-                pdf.setFont("Helvetica", 10)
-            pdf.drawString(70, y, line)
-            y -= 13
+        y = draw_wrapped_text(pdf, q_text, 60, y, max_width=85, line_height=18)
+
         y -= 20
         if y < 80:
             pdf.showPage()
@@ -343,13 +357,8 @@ def download_quiz():
     pdf.setFont("Helvetica", 12)
     for idx, question in enumerate(quiz, start=1):
         q_text = f"Q{idx}: {question}"
-        for line in pdf.breakLines(q_text, 85)[0]:
-            if y < 80:
-                pdf.showPage()
-                y = height - 60
-                pdf.setFont("Helvetica", 12)
-            pdf.drawString(60, y, line)
-            y -= 18
+        y = draw_wrapped_text(pdf, q_text, 60, y, max_width=85, line_height=18)
+
         y -= 10
 
     pdf.save()
