@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StudyMate - PDF Q&A</title>
+    <title>StudyMate - Document Q&A</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>📚 StudyMate</h1>
-            <p class="subtitle">AI-Powered PDF Question Answering System</p>
+            <p class="subtitle">AI-Powered Document Question Answering System</p>
         </header>
 
         <main>
@@ -20,34 +20,34 @@
                     <div class="file-input-wrapper">
                         <label for="pdfs" class="file-label">
                             <span class="file-icon">📄</span>
-                            <span>Choose PDF Files</span>
+                            <span>Choose Files (PDF, DOCX, PPTX, TXT)</span>
                         </label>
-                        <input type="file" 
-                               id="pdfs" 
-                               name="pdfs" 
-                               accept=".pdf" 
-                               multiple 
-                               required 
-                               onchange="displayFileNames()">
+                        <input 
+                            type="file" 
+                            id="pdfs" 
+                            name="pdfs" 
+                            accept=".pdf,.docx,.pptx,.txt" 
+                            multiple 
+                            required 
+                            onchange="displayFileNames()">
                     </div>
                     
                     <div id="file-list" class="file-list"></div>
                     
-                    <button type="submit" class="btn-primary">Process PDFs</button>
+                    <button type="submit" class="btn-primary">Process Files</button>
                 </form>
             </div>
 
             <div class="info-section">
                 <h3>How It Works</h3>
                 <ol>
-                    <li>Upload one or more PDF documents</li>
+                    <li>Upload PDF, DOCX, PPTX, or TXT files</li>
                     <li>System extracts and processes the content</li>
-                    <li>Ask questions about your documents</li>
-                    <li>Get accurate answers with source references</li>
+                    <li>Ask questions directly about your documents</li>
+                    <li>Get accurate answers and generate quizzes</li>
                 </ol>
             </div>
 
-            <!-- ✅ New button to view saved Q&A history -->
             <div class="button-group" style="text-align: center; margin-top: 25px;">
                 <a href="/history" class="btn-secondary">View Question History</a>
             </div>

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, send_file
 from flask_sqlalchemy import SQLAlchemy
 import os
 from werkzeug.utils import secure_filename
@@ -7,8 +7,10 @@ from llm_client import GraniteClient
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
-from flask import send_file
 
+# Import libraries for non-PDF document handling
+from docx import Document
+from pptx import Presentation
 
 # ====================================================
 # CONFIGURATION
@@ -19,7 +21,7 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///history.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
-app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
+app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'docx', 'pptx', 'txt'}
 
 db = SQLAlchemy(app)
 
@@ -45,10 +47,42 @@ with app.app_context():
     db.create_all()
 
 # ====================================================
-# HELPER FUNCTION
+# HELPER FUNCTIONS
 # ====================================================
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+def extract_text_from_docx(file_path):
+    """Extract text from Word document"""
+    try:
+        doc = Document(file_path)
+        return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+    except Exception as e:
+        print(f"[DOCX ERROR] {e}")
+        return ""
+
+def extract_text_from_pptx(file_path):
+    """Extract text from PowerPoint presentation"""
+    try:
+        prs = Presentation(file_path)
+        text_runs = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    text_runs.append(shape.text)
+        return "\n".join(text_runs)
+    except Exception as e:
+        print(f"[PPTX ERROR] {e}")
+        return ""
+
+def extract_text_from_txt(file_path):
+    """Extract text from plain text file"""
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    except Exception as e:
+        print(f"[TXT ERROR] {e}")
+        return ""
 
 # ====================================================
 # ROUTES
@@ -62,7 +96,7 @@ def index():
 @app.route('/process', methods=['POST'])
 def process():
     print("\n" + "=" * 90)
-    print("[APP] Starting PDF processing...")
+    print("[APP] Starting file processing...")
     print("=" * 90)
 
     if 'pdfs' not in request.files:
@@ -76,28 +110,52 @@ def process():
         print("[APP] ERROR: Empty file list or first file has no name")
         return redirect(url_for('index'))
 
-    pdf_paths = []
+    text_files = []
     for file in files:
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
+            ext = filename.rsplit('.', 1)[1].lower()
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
-            pdf_paths.append(filepath)
             print(f"[APP] Saved: {filepath}")
 
-    if not pdf_paths:
-        print("[APP] ERROR: No valid PDFs")
+            # Extract text based on file type
+            extracted_text = ""
+            if ext == "pdf":
+                text_files.append(filepath)
+                print(f"[APP] Using PDF directly: {filepath}")
+                continue
+            elif ext == "docx":
+                extracted_text = extract_text_from_docx(filepath)
+            elif ext == "pptx":
+                extracted_text = extract_text_from_pptx(filepath)
+            elif ext == "txt":
+                extracted_text = extract_text_from_txt(filepath)
+            else:
+                print(f"[APP] Skipping unsupported file type: {ext}")
+                continue
+
+            # Save extracted content as a temporary .txt file
+            temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{os.path.splitext(filename)[0]}_converted.txt")
+            with open(temp_path, "w", encoding="utf-8") as f:
+                f.write(extracted_text)
+            text_files.append(temp_path)
+            os.remove(filepath)  # remove original non-pdf file
+            print(f"[APP] Converted and saved as: {temp_path}")
+
+    if not text_files:
+        print("[APP] ERROR: No valid or convertible files found.")
         return redirect(url_for('index'))
 
     try:
-        print(f"[APP] Processing {len(pdf_paths)} PDF(s) with RAG...")
-        rag_engine.process_pdfs(pdf_paths)
+        print(f"[APP] Processing {len(text_files)} file(s) with RAG...")
+        rag_engine.process_pdfs(text_files)
         session['processed'] = True
         session['num_chunks'] = len(rag_engine.chunks)
-        print(f"[APP] RAG ready with {session['num_chunks']} chunks")
+        print(f"[APP] ✅ RAG ready with {session['num_chunks']} chunks")
 
-        # Clean up uploaded PDFs
-        for path in pdf_paths:
+        # Clean up temp files
+        for path in text_files:
             if os.path.exists(path):
                 os.remove(path)
                 print(f"[APP] Removed temp: {path}")
@@ -108,7 +166,7 @@ def process():
         import traceback
         print("[APP] ERROR during processing:", e)
         print(traceback.format_exc())
-        return f"Error processing PDFs: {str(e)}", 500
+        return f"Error processing files: {str(e)}", 500
 
 
 @app.route('/ask', methods=['GET'])
@@ -189,6 +247,7 @@ def history():
     records = QuestionHistory.query.order_by(QuestionHistory.id.desc()).all()
     return render_template('history.html', records=records)
 
+
 @app.route('/download_history')
 def download_history():
     records = QuestionHistory.query.order_by(QuestionHistory.id.asc()).all()
@@ -206,7 +265,6 @@ def download_history():
     y -= 40
 
     pdf.setFont("Helvetica", 11)
-
     for idx, record in enumerate(records, start=1):
         q_text = f"Q{idx}: {record.question}"
         a_text = f"A{idx}: {record.answer}"
@@ -217,29 +275,86 @@ def download_history():
 
         pdf.setFont("Helvetica", 10)
         for line in pdf.breakLines(a_text, 85)[0]:
-            if y < 80:  # new page
+            if y < 80:
                 pdf.showPage()
                 y = height - 60
                 pdf.setFont("Helvetica", 10)
             pdf.drawString(70, y, line)
             y -= 13
-
-        y -= 20  # spacing between entries
-
-        if y < 80:  # prevent overflow
+        y -= 20
+        if y < 80:
             pdf.showPage()
             pdf.setFont("Helvetica", 11)
             y = height - 60
 
     pdf.save()
     buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name="StudyMate_History.pdf", mimetype="application/pdf")
 
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name="StudyMate_History.pdf",
-        mimetype="application/pdf"
-    )
+# ====================================================
+# QUIZ GENERATION FEATURE
+# ====================================================
+@app.route('/generate_quiz')
+def generate_quiz():
+    if not session.get('processed'):
+        return redirect(url_for('index'))
+
+    try:
+        context, _ = rag_engine.build_context("Generate quiz questions", top_k=10, max_chars=4000)
+        print(f"[QUIZ] Using {len(context)} characters of context for quiz generation.")
+
+        prompt = (
+            "You are an expert exam question designer. Based on the study material below, "
+            "generate 5 **high-quality questions** that test understanding, reasoning, and application. "
+            "Avoid superficial questions. Make them concise, numbered 1 to 5, and directly related to the text.\n\n"
+            f"Study Material:\n{context}"
+        )
+
+        quiz_text = llm_client.generate_answer(prompt, context, max_new_tokens=300)
+        questions = [q.strip(" .") for q in quiz_text.split("\n") if q.strip()]
+        questions = [q for q in questions if len(q) > 5][:5]
+        session['quiz'] = questions
+
+        print(f"[QUIZ] Generated {len(questions)} questions.")
+        return render_template('quiz.html', questions=questions)
+
+    except Exception as e:
+        import traceback
+        print("[QUIZ] ERROR during quiz generation:", e)
+        print(traceback.format_exc())
+        return f"Quiz generation failed: {e}", 500
+
+
+@app.route('/download_quiz')
+def download_quiz():
+    quiz = session.get('quiz', [])
+    if not quiz:
+        return "No quiz available to download.", 404
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    y = height - 60
+
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(200, y, "📘 StudyMate - Quiz")
+    y -= 40
+
+    pdf.setFont("Helvetica", 12)
+    for idx, question in enumerate(quiz, start=1):
+        q_text = f"Q{idx}: {question}"
+        for line in pdf.breakLines(q_text, 85)[0]:
+            if y < 80:
+                pdf.showPage()
+                y = height - 60
+                pdf.setFont("Helvetica", 12)
+            pdf.drawString(60, y, line)
+            y -= 18
+        y -= 10
+
+    pdf.save()
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name="StudyMate_Quiz.pdf", mimetype="application/pdf")
 
 # ====================================================
 # ENTRY POINT
